@@ -1,0 +1,38 @@
+{
+    "name": "inventory-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "tasks.max": "1",
+        "database.hostname": "postgres",
+        "database.port": "5432",
+        "database.user": "postgres",
+        "database.password": "postgres",
+        "database.dbname": "postgres",
+        "schema.history.internal.consumer.security.protocol": "SASL_PLAINTEXT",
+        "schema.name.adjustment.mode": "avro",
+        "schema.history.internal.kafka.bootstrap.servers": "kafka1:9092,kafka2:9092,kafka3:9092",
+        "schema.history.internal.producer.client.id": "kafka_upgrade_simulation",
+        "schema.history.internal.consumer.sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"admin\" password=\"12345\";",
+        "inconsistent.schema.handling.mode": "warn",
+        "schema.include": "inventory",
+        "schema.history.internal.producer.sasl.mechanism": "SCRAM-SHA-512",
+        "schema.history.internal.consumer.client.id": "kafka_upgrade_simulation",
+        "decimal.handling.mode": "string",
+        "schema.history.internal.producer.security.protocol": "SASL_PLAINTEXT",
+        "schema.history.internal.consumer.sasl.mechanism": "SCRAM-SHA-512",
+        "field.name.adjustment.mode": "avro",
+        "schema.history.internal.producer.sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"admin\" password=\"12345\";",
+        "database.server.name": "debezium_cdc",
+        "table.include.list": "inventory.customers,inventory.geom,inventory.orders,inventory.products,inventory.products_on_hand,inventory.spatial_ref_sys",
+        "internal.database.history.ddl.filter": "SAVEPOINT.*,# Dum.*,",
+        "key.converter": "io.confluent.connect.avro.AvroConverter",
+        "slot.name": "debezium_cdc",
+        "snapshot.mode": "initial",
+        "transforms": "unwrap",
+        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "key.converter.schema.registry.url": "http://schema-registry:8081"
+
+    }
+}

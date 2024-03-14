@@ -1,0 +1,264 @@
+version: "3.7"
+
+services:
+  zookeeper1:
+    image: "zookeeper:$ZOOKEEPER_VERSION"
+    volumes:
+      - ./zookeeper/zookeeper1/zoo.cfg:/conf/zoo.cfg
+      - ./zookeeper/zookeeper1/data:/var/lib/zookeeper
+
+  zookeeper2:
+    image: "zookeeper:$ZOOKEEPER_VERSION"
+    volumes:
+      - ./zookeeper/zookeeper2/zoo.cfg:/conf/zoo.cfg
+      - ./zookeeper/zookeeper2/data:/var/lib/zookeeper
+
+  zookeeper3:
+    image: "zookeeper:$ZOOKEEPER_VERSION"
+    volumes:
+      - ./zookeeper/zookeeper3/zoo.cfg:/conf/zoo.cfg
+      - ./zookeeper/zookeeper3/data:/var/lib/zookeeper
+
+  kafka1:
+    build:
+      context: kafka
+      dockerfile: Dockerfile-Kafka
+      args:
+        - "KAFKA_VERSION=$KAFKA_VERSION"
+    env_file:
+      - ./kafka/server1.env
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/kafka1/9092) &>/dev/null && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3
+
+  kafka-setup-user:
+    image: "bitnami/kafka:$KAFKA_VERSION"
+    environment:
+      - KAFKA_INTER_BROKER_USER=admin
+      - KAFKA_INTER_BROKER_PASSWORD=12345
+    entrypoint: /bin/bash /entrypoint.sh
+    volumes:
+      - ./kafka-setup-user/entrypoint.sh:/entrypoint.sh
+    depends_on:
+      kafka1:
+        condition: service_started
+
+  kafka2:
+    build:
+      context: kafka
+      dockerfile: Dockerfile-Kafka
+      args:
+        - "KAFKA_VERSION=$KAFKA_VERSION"
+    env_file:
+      - ./kafka/server2.env
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/kafka2/9092) &>/dev/null && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      kafka-setup-user:
+        condition: service_completed_successfully
+
+  kafka3:
+    build:
+      context: kafka
+      dockerfile: Dockerfile-Kafka
+      args:
+        - "KAFKA_VERSION=$KAFKA_VERSION"
+    env_file:
+      - ./kafka/server3.env
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/kafka3/9092) &>/dev/null && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - kafka2
+
+  schema-registry:
+    image: "confluentinc/cp-schema-registry:$SCHEMA_REGISTRY_VERSION"
+    env_file:
+      - ./schema-registry/schema-registry.env
+    volumes:
+      - ./schema-registry/kafka_client_jaas.conf:/app/kafka_client_jaas.conf
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/schema-registry/8081) &>/dev/null && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - kafka3
+
+  kafka-setup-topic:
+    image: "bitnami/kafka:$KAFKA_VERSION"
+    entrypoint: /bin/bash /entrypoint.sh
+    volumes:
+      - ./kafka-setup-topic/entrypoint.sh:/entrypoint.sh
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+  
+  postgres:
+    image: "quay.io/debezium/example-postgres:$POSTGRES_EXAMPLE_VERSION"
+    environment:
+     - POSTGRES_USER=postgres
+     - POSTGRES_PASSWORD=postgres
+    command: -c listen_addresses='*'
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/postgres/5432) &>/dev/null && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - kafka-setup-topic
+  
+  debezium:
+    image: "debezium/connect:$DEBEZIUM_VERSION"
+    env_file:
+      - ./debezium/kafka-connect.env
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/debezium/8083) &>/dev/null && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - 8083:8083
+    depends_on:
+      postgres:
+        condition: service_started
+      schema-registry:
+        condition: service_healthy
+      kafka-setup-topic:
+        condition: service_completed_successfully
+  
+  producer:
+    build:
+      context: python-producer-consumer
+      dockerfile: Dockerfile-Python
+      args:
+        - "PYTHON_VERSION=$PYTHON_VERSION"
+    command: >-
+      python producer.py
+        --bootstrap-servers kafka1:9092,kafka2:9092,kafka3:9092
+        --security-protocol SASL_PLAINTEXT
+        --sasl-mechanism SCRAM-SHA-512
+        --sasl-username producer
+        --sasl-password 12345
+        --topic test-topic
+        --schema-registry http://schema-registry:8081
+    volumes:
+      - ./python-producer-consumer/producer.py:/app/producer.py
+    depends_on:
+      kafka-setup-topic:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
+
+  submit-connector:
+    image: "curlimages/curl:$CURL_VERSION"
+    entrypoint: /bin/sh /entrypoint.sh
+    volumes:
+      - ./submit-connector/entrypoint.sh:/entrypoint.sh
+      - ./submit-connector/register-postgres.json:/register-postgres.json
+    depends_on:
+      debezium:
+        condition: service_healthy
+
+  postgres-producer:
+    build:
+      context: python-producer-consumer
+      dockerfile: Dockerfile-Python
+      args:
+        - "PYTHON_VERSION=$PYTHON_VERSION"
+    command: >-
+      python postgres-producer.py
+        --host postgres 
+        --port 5432 
+        --database postgres 
+        --user postgres 
+        --password postgres
+    volumes:
+      - ./python-producer-consumer/postgres-producer.py:/app/postgres-producer.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+      
+  consumer:
+    build:
+      context: python-producer-consumer
+      dockerfile: Dockerfile-Python
+      args:
+        - "PYTHON_VERSION=$PYTHON_VERSION"
+    command: >-
+      python /app/consumer.py
+        --bootstrap-servers kafka1:9092,kafka2:9092,kafka3:9092
+        --security-protocol SASL_PLAINTEXT
+        --sasl-mechanism SCRAM-SHA-512
+        --sasl-username consumer
+        --sasl-password 12345
+        --group-id test-group
+        --topic test-topic
+        --schema-registry http://schema-registry:8081
+    volumes:
+      - ./python-producer-consumer/consumer.py:/app/consumer.py
+    depends_on:
+      - producer
+  
+  kafka-ui:
+    image: 'bitnami/kafka-ui:v0.7.1'
+    ports:
+      - '7623:8080'
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=upgrade_simulation
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka1:9092,kafka2:9092,kafka3:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper1:2181,zookeeper2:2181,zookeeper3:2181
+      - KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL=SASL_PLAINTEXT
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM=SCRAM-SHA-512
+      - KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG=org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="12345";
+      - KAFKA_CLUSTERS_0_SCHEMAREGISTRY=http://schema-registry:8081
+    depends_on:
+      - schema-registry
+  clickhouse:
+    image: "clickhouse/clickhouse-server:$CLICKHOUSE_VERSION"
+    volumes:
+      - ./clickhouse/configs/kafka.xml:/etc/clickhouse-server/config.d/kafka.xml
+      - ./clickhouse/schemas:/docker-entrypoint-initdb.d
+      - ./clickhouse/data:/var/lib/clickhouse/
+      - ./clickhouse/log:/var/log/clickhouse-server/
+    ulimits:
+      nofile:
+          soft: 262144
+          hard: 262144
+    ports:
+      - "8129:8123"
+      - "9075:9000"
+    environment:
+      - "CLICKHOUSE_USER=default"
+      - "CLICKHOUSE_PASSWORD=12345"
+      - "CLICKHOUSE_DATABASE=kafka_test"
+    depends_on:
+      producer:
+        condition: service_started
+      submit-connector:
+        condition: service_completed_successfully
+
+networks:
+  internal-network:
+    driver: bridge

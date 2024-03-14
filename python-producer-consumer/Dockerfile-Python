@@ -1,0 +1,11 @@
+ARG PYTHON_VERSION
+
+FROM python:${PYTHON_VERSION}
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get -y install libpq-dev gcc && \
+    pip install --upgrade pip && \
+    pip install confluent-kafka urllib3 requests "confluent-kafka[avro]" psycopg2 Faker 
+

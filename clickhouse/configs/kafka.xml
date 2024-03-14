@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<yandex>
+    <kafka>
+        <client_id>kafka_upgrade_simulation</client_id>
+        <security_protocol>sasl_plaintext</security_protocol>
+        <sasl_mechanism>SCRAM-SHA-512</sasl_mechanism>
+        <sasl_username>clickhouse</sasl_username>
+        <sasl_password>12345</sasl_password>
+    </kafka>
+</yandex>

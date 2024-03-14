@@ -1,0 +1,5 @@
+ARG KAFKA_VERSION
+
+FROM bitnami/kafka:${KAFKA_VERSION}
+
+COPY libkafka.sh /libkafka.sh
